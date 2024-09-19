@@ -61,11 +61,8 @@ app = App(token=slack_bot_token)
 
 def init_slack():
     try:
-        # Test the connection
         slack_client.auth_test()
         st.success("Connected to Slack successfully")
-        
-        # Start the Socket Mode handler in a separate thread
         handler = SocketModeHandler(app, slack_app_token)
         thread = threading.Thread(target=handler.start)
         thread.start()
@@ -74,10 +71,7 @@ def init_slack():
 
 def send_slack_notification(message, channel="#attendance-notifications"):
     try:
-        response = slack_client.chat_postMessage(
-            channel=channel,
-            text=message
-        )
+        response = slack_client.chat_postMessage(channel=channel, text=message)
         return True
     except SlackApiError as e:
         st.error(f"Error sending Slack notification: {e.response['error']}")
@@ -114,11 +108,9 @@ def store_in_pinecone(index, data, vector):
 def query_gpt(prompt):
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant analyzing attendance and leave data."},
-                {"role": "user", "content": prompt}
-            ]
+            model="gpt-4",
+            messages=[{"role": "system", "content": "You are a helpful assistant analyzing attendance and leave data."},
+                      {"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -151,6 +143,21 @@ def fetch_attendance(employee_id, from_date, to_date):
         return []
     except Exception as e:
         st.error(f"An error occurred while querying Pinecone: {str(e)}")
+        return []
+
+def fetch_leave_requests(employee_id=None):
+    try:
+        query_vector = create_embedding(f"Leave requests {employee_id if employee_id else 'all users'}")
+        if query_vector:
+            results = leave_index.query(vector=query_vector, top_k=100, include_metadata=True)
+            leave_data = [
+                r['metadata'] for r in results['matches']
+                if (employee_id == "All" or r['metadata'].get('employee_id') == employee_id)
+            ]
+            return leave_data
+        return []
+    except Exception as e:
+        st.error(f"An error occurred while querying leave data: {str(e)}")
         return []
 
 def download_to_excel(data, employee_id):
@@ -194,11 +201,7 @@ def login():
 
 def query_staff_by_username(username):
     query_vector = create_embedding(username)
-    results = staff_index.query(
-        vector=query_vector,
-        top_k=1,
-        include_metadata=True
-    )
+    results = staff_index.query(vector=query_vector, top_k=1, include_metadata=True)
     if results['matches']:
         return results['matches'][0]['metadata']
     return None
@@ -233,7 +236,33 @@ def admin_panel():
             if submit_button:
                 add_user(new_username, new_password, new_email, new_role)
 
-    # Add more admin functionalities here
+    if st.button("View Existing Users"):
+        users = fetch_users()
+        st.subheader("Existing Users")
+        st.write(users)
+
+    if st.button("View All Leave Requests"):
+        leave_data = fetch_leave_requests("All")
+        st.subheader("All Leave Requests")
+        st.write(leave_data)
+
+    st.subheader("View Attendance")
+    employee_id = st.text_input("Employee ID (leave blank to view all)")
+    from_date = st.date_input("From Date", date.today().replace(day=1))
+    to_date = st.date_input("To Date", date.today())
+
+    if st.button("View Attendance"):
+        attendance_data = fetch_attendance(employee_id, from_date.isoformat(), to_date.isoformat())
+        if attendance_data:
+            for entry in attendance_data:
+                entry_time = entry.get('entry_time', 'N/A')
+                exit_time = entry.get('exit_time', 'N/A')
+                working_hours = calculate_working_hours(entry_time, exit_time)
+                st.write(f"Date: {entry.get('entry_date')}")
+                st.write(f"Entry: {entry_time}, Exit: {exit_time}")
+                st.write(f"Total hours worked: {working_hours:.2f}")
+                st.write("---")
+            download_to_excel(attendance_data, employee_id)
 
 def staff_panel(user_id):
     st.header("Staff Panel")
@@ -246,6 +275,11 @@ def staff_panel(user_id):
         submit_leave_request(user_id)
     elif choice == "📊 View My Attendance":
         view_attendance(user_id)
+
+def fetch_users():
+    query_vector = create_embedding("staff users")
+    results = staff_index.query(vector=query_vector, top_k=100, include_metadata=True)
+    return [r['metadata'] for r in results['matches']]
 
 def record_attendance(user_id):
     st.subheader("Record Daily Attendance")
@@ -337,7 +371,6 @@ def main():
             st.error("Pinecone API key not found in environment variables.")
             return
 
-    # Initialize Slack
     init_slack()
 
     if 'user_role' not in st.session_state:
