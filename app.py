@@ -35,9 +35,9 @@ staff_index = None
 def init_pinecone(api_key):
     global pinecone_initialized, attendance_index, leave_index, staff_index
     try:
-        # Initialize Pinecone
-        pinecone.init(api_key=api_key, environment="gcp-starter")
-        
+        # Use the correct Pinecone environment for the "us-east-1" region
+        pinecone.init(api_key=api_key, environment="us-east-1")
+
         # Check and create the indexes if they do not exist
         if ATTENDANCE_INDEX not in pinecone.list_indexes():
             pinecone.create_index(ATTENDANCE_INDEX, dimension=768)
