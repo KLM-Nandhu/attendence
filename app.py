@@ -1,26 +1,6 @@
 import streamlit as st
 import sys
 import pkg_resources
-
-def check_dependencies():
-    dependencies = [
-        'streamlit', 'pinecone-client', 'python-dotenv', 'pandas', 'numpy',
-        'openpyxl', 'xlsxwriter', 'slack-sdk', 'slack-bolt', 'bcrypt', 'openai'
-    ]
-    
-    st.write("Python version:", sys.version)
-    st.write("Installed package versions:")
-    
-    for package in dependencies:
-        try:
-            version = pkg_resources.get_distribution(package).version
-            st.write(f"{package}: {version}")
-        except pkg_resources.DistributionNotFound:
-            st.write(f"{package}: Not found")
-
-check_dependencies()
-
-# Rest of your imports
 import pinecone
 from datetime import datetime, date, time
 from openai import OpenAI
