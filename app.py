@@ -35,10 +35,22 @@ staff_index = None
 def init_pinecone(api_key):
     global pinecone_initialized, attendance_index, leave_index, staff_index
     try:
+        # Initialize Pinecone
         pinecone.init(api_key=api_key, environment="gcp-starter")
+        
+        # Check and create the indexes if they do not exist
+        if ATTENDANCE_INDEX not in pinecone.list_indexes():
+            pinecone.create_index(ATTENDANCE_INDEX, dimension=768)
+        if LEAVE_INDEX not in pinecone.list_indexes():
+            pinecone.create_index(LEAVE_INDEX, dimension=768)
+        if STAFF_INDEX not in pinecone.list_indexes():
+            pinecone.create_index(STAFF_INDEX, dimension=768)
+        
+        # Connect to the indexes
         attendance_index = pinecone.Index(ATTENDANCE_INDEX)
         leave_index = pinecone.Index(LEAVE_INDEX)
         staff_index = pinecone.Index(STAFF_INDEX)
+        
         pinecone_initialized = True
         st.success("Connected to Pinecone indexes successfully")
         return True
@@ -266,15 +278,13 @@ def admin_panel():
 
 def staff_panel(user_id):
     st.header("Staff Panel")
-    menu = ["📅 Daily Attendance", "🏖️ Leave Request", "📊 View My Attendance"]
+    menu = ["📅 Daily Attendance", "🏖️ Leave Request"]
     choice = st.sidebar.radio("Select Option", menu)
 
     if choice == "📅 Daily Attendance":
         record_attendance(user_id)
     elif choice == "🏖️ Leave Request":
         submit_leave_request(user_id)
-    elif choice == "📊 View My Attendance":
-        view_attendance(user_id)
 
 def fetch_users():
     query_vector = create_embedding("staff users")
@@ -340,25 +350,6 @@ def submit_leave_request(user_id):
             send_slack_notification(slack_message)
         else:
             st.error("Failed to submit leave request.")
-
-def view_attendance(user_id):
-    st.subheader("View My Attendance")
-    from_date = st.date_input("📆 From", date.today().replace(day=1))
-    to_date = st.date_input("📆 To", date.today())
-    
-    if st.button("👁️ View Attendance"):
-        attendance_data = fetch_attendance(user_id, from_date.isoformat(), to_date.isoformat())
-        if attendance_data:
-            for entry in attendance_data:
-                entry_time = entry.get('entry_time', 'N/A')
-                exit_time = entry.get('exit_time', 'N/A')
-                working_hours = calculate_working_hours(entry_time, exit_time)
-                st.write(f"📅 Date: {entry.get('entry_date')}")
-                st.write(f"🕒 Entry: {entry_time}, Exit: {exit_time}")
-                st.write(f"⏱️ Total hours worked: {working_hours:.2f}")
-                st.write("---")
-        else:
-            st.info("No attendance data found for the selected date range.")
 
 def main():
     st.title("🗓️ LEAVES-BUDDY")
