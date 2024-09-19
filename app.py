@@ -8,13 +8,16 @@ import pandas as pd
 import io
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from slack_bolt import App
+from slack_bolt.adapter.socket_mode import SocketModeHandler
 import bcrypt
-
-# Set page config at the very beginning
-st.set_page_config(page_title="LEAVES-BUDDY", page_icon="🗓️", layout="wide")
+import threading
 
 # Load environment variables
 load_dotenv()
+
+# Set page config at the very beginning
+st.set_page_config(page_title="LEAVES-BUDDY", page_icon="🗓️", layout="wide")
 
 # Constants
 ATTENDANCE_INDEX = "attendance-index"
@@ -44,8 +47,44 @@ def init_pinecone(api_key):
 # Initialize OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Initialize Slack client
-slack_client = WebClient(token=os.getenv("SLACK_BOT_TOKEN"))
+# Initialize Slack
+slack_bot_token = os.getenv("SLACK_BOT_TOKEN")
+slack_app_token = os.getenv("SLACK_APP_TOKEN")
+
+if not slack_bot_token or not slack_app_token:
+    raise ValueError("Slack tokens are missing. Please check your .env file.")
+
+slack_client = WebClient(token=slack_bot_token)
+app = App(token=slack_bot_token)
+
+def init_slack():
+    try:
+        # Test the connection
+        slack_client.auth_test()
+        st.success("Connected to Slack successfully")
+        
+        # Start the Socket Mode handler in a separate thread
+        handler = SocketModeHandler(app, slack_app_token)
+        thread = threading.Thread(target=handler.start)
+        thread.start()
+    except SlackApiError as e:
+        st.error(f"Error connecting to Slack: {e}")
+
+def send_slack_notification(message, channel="#attendance-notifications"):
+    try:
+        response = slack_client.chat_postMessage(
+            channel=channel,
+            text=message
+        )
+        return True
+    except SlackApiError as e:
+        st.error(f"Error sending Slack notification: {e.response['error']}")
+        return False
+
+@app.event("app_mention")
+def handle_mention(event, say):
+    user = event['user']
+    say(f"Hi there, <@{user}>! How can I help you with attendance or leave requests?")
 
 def create_embedding(text):
     try:
@@ -73,7 +112,7 @@ def store_in_pinecone(index, data, vector):
 def query_gpt(prompt):
     try:
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant analyzing attendance and leave data."},
                 {"role": "user", "content": prompt}
@@ -128,29 +167,18 @@ def download_to_excel(data, employee_id):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-def send_slack_notification(message):
-    try:
-        response = slack_client.chat_postMessage(
-            channel="#attendance-notifications",
-            text=message
-        )
-        return True
-    except SlackApiError as e:
-        st.error(f"Error sending Slack notification: {e.response['error']}")
-        return False
-
 def hash_password(password):
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
 
 def check_password(password, hashed_password):
-    return bcrypt.checkpw(password.encode('utf-8'), hashed_password)
+    return bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8'))
 
 def login():
     st.header("Login")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
     if st.button("Login"):
-        if username == "admin" and password == "admin":  # Replace with secure admin credentials
+        if username == os.getenv("ADMIN_USERNAME") and password == os.getenv("ADMIN_PASSWORD"):
             st.session_state['user_role'] = 'admin'
             return True
         else:
@@ -175,7 +203,7 @@ def query_staff_by_username(username):
 
 def add_user(username, password, email, role):
     user_id = f"user_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-    hashed_password = hash_password(password)
+    hashed_password = hash_password(password).decode('utf-8')  # Convert bytes to string
     user_data = {
         "id": user_id,
         "username": username,
@@ -306,6 +334,9 @@ def main():
         else:
             st.error("Pinecone API key not found in environment variables.")
             return
+
+    # Initialize Slack
+    init_slack()
 
     if 'user_role' not in st.session_state:
         if login():
